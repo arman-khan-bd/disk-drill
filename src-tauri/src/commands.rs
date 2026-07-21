@@ -35,21 +35,13 @@ pub async fn get_drive_smart_status(drive_id: String) -> Result<SmartStatus, Str
 
 /// Open a raw device path for reading (Windows: `\\.\C:`, `\\.\PhysicalDrive0`).
 /// Returns a std::fs::File handle positioned at byte 0.
-#[cfg(windows)]
 fn open_raw_device(drive_path: &str) -> Result<std::fs::File, String> {
-    use std::os::windows::fs::OpenOptionsExt;
-    // FILE_FLAG_NO_BUFFERING (0x2000_0000) gives sector-aligned direct access
+    // Normalise: strip trailing backslash so "\\.\C:\" becomes "\\.\C:"
+    let path = drive_path.trim_end_matches(['\\', '/']);
     std::fs::OpenOptions::new()
         .read(true)
-        .custom_flags(0x2000_0000)
-        .open(drive_path)
-        .map_err(|e| format!("Cannot open device '{}': {}. Run the app as Administrator.", drive_path, e))
-}
-
-#[cfg(not(windows))]
-fn open_raw_device(drive_path: &str) -> Result<std::fs::File, String> {
-    std::fs::File::open(drive_path)
-        .map_err(|e| format!("Cannot open device '{}': {}. Requires root privileges.", drive_path, e))
+        .open(path)
+        .map_err(|e| format!("Cannot open device '{}': {}", path, e))
 }
 
 #[tauri::command]
@@ -69,6 +61,10 @@ pub async fn start_scan(
     }
 
     let scan_id = format!("scan_{}", chrono::Utc::now().timestamp_millis());
+
+    // Normalise drive_path: strip trailing backslash/slash so "\\.\C:\" → "\\.\C:"
+    let raw_drive_path = config.drive_path.trim_end_matches(['\\', '/']).to_string();
+
     let total_bytes = if config.total_bytes > 0 {
         config.total_bytes
     } else {
@@ -122,7 +118,7 @@ pub async fn start_scan(
     // ── Phase 2: Deep Scan – Real raw sector carving ───────────────────────
     if config.enable_deep_scan {
         // Try to open the raw device; if it fails (no admin) still continue with what we have
-        match open_raw_device(&config.drive_path) {
+        match open_raw_device(&raw_drive_path) {
             Ok(mut device) => {
                 // Read 4 MB chunks — must be multiple of sector size for FILE_FLAG_NO_BUFFERING
                 const CHUNK_SIZE: usize = 4 * 1024 * 1024; // 4 MB

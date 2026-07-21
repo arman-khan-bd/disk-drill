@@ -38,15 +38,16 @@ export const App: React.FC = () => {
 
   const fetchDrives = async () => {
     try {
-      if (window.__TAURI_INTERNALS__) {
-        const res = await invoke<DriveInfo[]>('get_system_drives');
-        setDrives(res || []);
-      } else {
-        const res = await invoke<DriveInfo[]>('get_system_drives');
-        setDrives(res || []);
+      const res = await invoke<DriveInfo[]>('get_system_drives');
+      const drives = res || [];
+      setDrives(drives);
+      // Auto-select the first drive so storage size shows immediately
+      const { selectedDrive: current, setSelectedDrive } = useAppStore.getState();
+      if (!current && drives.length > 0) {
+        setSelectedDrive(drives[0]);
       }
     } catch (err) {
-      console.error('Failed to fetch system drives from Rust IPC backend:', err);
+      console.error('Failed to fetch system drives:', err);
     }
   };
 
@@ -78,13 +79,14 @@ export const App: React.FC = () => {
       return;
     }
 
-    // Derive the raw device path from the selected partition
-    // e.g. first partition mount_point "C:\" → device "\\.\ C:"
+    // Build raw device path from the selected partition mount point.
+    // Partition id from drive.rs is normalised to "C:" (no trailing backslash).
+    // Windows raw device path: "\\.\C:" — in JS string: "\\\\.\\C:"
     const firstPartition = selectedDrive.partitions[0];
-    const mountPoint = firstPartition?.mount_point ?? '';
-    // On Windows a mount point like "C:\" maps to device "\\.\C:"
-    const driveLetter = mountPoint.length >= 2 ? mountPoint.substring(0, 2) : '';
-    const drivePath = driveLetter ? `\\\\.\\${driveLetter}` : selectedDrive.device_path;
+    const partitionId = firstPartition?.id ?? selectedDrive.id; // e.g. "C:"
+    // Strip any trailing backslash from partition id just in case
+    const cleanId = partitionId.replace(/\\+$/, '');
+    const drivePath = `\\\\.\\${cleanId}`; // becomes "\\.\C:" at runtime
 
     const onProgress = new Channel<ScanProgressEvent>();
     onProgress.onmessage = (evt) => {
@@ -97,8 +99,8 @@ export const App: React.FC = () => {
     try {
       const result = await invoke<ScanResult>('start_scan', {
         config: {
-          drive_id: firstPartition?.id ?? selectedDrive.id,
-          drive_path: drivePath,
+          drive_id: cleanId,      // e.g. "C:" — used for $Recycle.Bin scan
+          drive_path: drivePath,  // e.g. "\\.\C:" — used for raw sector read
           total_bytes: firstPartition?.total_bytes ?? selectedDrive.total_bytes,
           enable_fast_scan: true,
           enable_deep_scan: true,
