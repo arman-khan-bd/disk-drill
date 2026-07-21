@@ -35,76 +35,6 @@ export const App: React.FC = () => {
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
 
-  const MOCK_DRIVES: DriveInfo[] = [
-    {
-      id: 'drive_0',
-      name: 'Physical Drive 0 (NVMe SSD)',
-      device_path: '\\\\.\\PhysicalDrive0',
-      drive_type: 'NVMe SSD',
-      total_bytes: 512000000000,
-      partition_table: 'GPT',
-      is_elevated: true,
-      smart: {
-        health_percentage: 98,
-        temperature_c: 38,
-        read_errors: 0,
-        write_errors: 0,
-        power_on_hours: 1420,
-        status_text: 'GOOD',
-      },
-      partitions: [
-        {
-          id: 'C:',
-          mount_point: 'C:\\',
-          volume_name: 'Windows (C:)',
-          file_system: 'NTFS',
-          total_bytes: 450000000000,
-          available_bytes: 120000000000,
-          used_bytes: 330000000000,
-          is_removable: false,
-        },
-        {
-          id: 'D:',
-          mount_point: 'D:\\',
-          volume_name: 'Data Volume (D:)',
-          file_system: 'exFAT',
-          total_bytes: 620000000000,
-          available_bytes: 250000000000,
-          used_bytes: 370000000000,
-          is_removable: false,
-        },
-      ],
-    },
-    {
-      id: 'drive_1',
-      name: 'Physical Drive 1 (SanDisk Ultra USB)',
-      device_path: '\\\\.\\PhysicalDrive1',
-      drive_type: 'USB Flash Drive',
-      total_bytes: 64000000000,
-      partition_table: 'MBR',
-      is_elevated: true,
-      smart: {
-        health_percentage: 100,
-        temperature_c: 31,
-        read_errors: 0,
-        write_errors: 0,
-        power_on_hours: 120,
-        status_text: 'HEALTHY',
-      },
-      partitions: [
-        {
-          id: 'E:',
-          mount_point: 'E:\\',
-          volume_name: 'RECOVERY_USB (E:)',
-          file_system: 'FAT32',
-          total_bytes: 64000000000,
-          available_bytes: 48000000000,
-          used_bytes: 16000000000,
-          is_removable: true,
-        },
-      ],
-    },
-  ];
 
   const fetchDrives = async () => {
     try {
@@ -132,73 +62,29 @@ export const App: React.FC = () => {
     setActiveTab('scan');
 
     if (!window.__TAURI_INTERNALS__) {
-      // Browser simulation mode
-      let progress = 0;
-      const interval = setInterval(() => {
-        progress += 10;
-        setScanProgress({
-          scan_id: 'scan_preview_101',
-          scanned_bytes: (progress / 100) * selectedDrive.total_bytes,
-          total_bytes: selectedDrive.total_bytes,
-          progress_percent: progress,
-          speed_mbps: 420.5,
-          eta_seconds: Math.max(0, Math.floor((100 - progress) / 10)),
-          files_found_count: Math.floor(progress * 1.4),
-          is_complete: progress >= 100,
-          current_phase: progress < 20 ? 'Fast Scan (File System Parsing)' : 'Deep Scan (Sector Carving)',
-        });
-
-        if (progress >= 100) {
-          clearInterval(interval);
-          setIsScanning(false);
-          setScannedFiles([
-            {
-              id: 'file_1',
-              file_name: 'Financial_Report_2025.docx',
-              extension: 'docx',
-              category: 'Documents',
-              start_sector: 2048,
-              offset_bytes: 1048576,
-              size_bytes: 4194304,
-              recovery_health: 'High',
-              hash_md5: 'e10adc3949ba59abbe56e057f20f883e',
-              date_modified: '2026-07-21 09:30:00',
-              is_deleted: true,
-              original_path: '/Documents/Work/Financial_Report_2025.docx',
-            },
-            {
-              id: 'file_2',
-              file_name: 'Vacation_Photo_001.jpg',
-              extension: 'jpg',
-              category: 'Images',
-              start_sector: 4096,
-              offset_bytes: 2097152,
-              size_bytes: 6291456,
-              recovery_health: 'High',
-              hash_md5: 'c3335a3d07d4e4acab845f9a65f8f41e',
-              date_modified: '2026-07-21 08:15:20',
-              is_deleted: true,
-              original_path: '/Photos/Vacation_Photo_001.jpg',
-            },
-            {
-              id: 'file_3',
-              file_name: 'Promo_Video.mp4',
-              extension: 'mp4',
-              category: 'Video',
-              start_sector: 16384,
-              offset_bytes: 8388608,
-              size_bytes: 356515840,
-              recovery_health: 'High',
-              hash_md5: '7d793037a0760186574b0282f2f435e7',
-              date_modified: '2026-07-20 14:22:10',
-              is_deleted: true,
-              original_path: '/Videos/Marketing/Promo_Video.mp4',
-            },
-          ]);
-        }
-      }, 500);
+      // This app requires the native Tauri runtime to access real disk hardware.
+      setIsScanning(false);
+      setScanProgress({
+        scan_id: '',
+        scanned_bytes: 0,
+        total_bytes: 0,
+        progress_percent: 0,
+        speed_mbps: 0,
+        eta_seconds: 0,
+        files_found_count: 0,
+        is_complete: false,
+        current_phase: 'ERROR: Please run the compiled Tauri app (not a browser). Real drive scanning requires native OS access.',
+      });
       return;
     }
+
+    // Derive the raw device path from the selected partition
+    // e.g. first partition mount_point "C:\" → device "\\.\ C:"
+    const firstPartition = selectedDrive.partitions[0];
+    const mountPoint = firstPartition?.mount_point ?? '';
+    // On Windows a mount point like "C:\" maps to device "\\.\C:"
+    const driveLetter = mountPoint.length >= 2 ? mountPoint.substring(0, 2) : '';
+    const drivePath = driveLetter ? `\\\\.\\${driveLetter}` : selectedDrive.device_path;
 
     const onProgress = new Channel<ScanProgressEvent>();
     onProgress.onmessage = (evt) => {
@@ -211,7 +97,9 @@ export const App: React.FC = () => {
     try {
       const result = await invoke<ScanResult>('start_scan', {
         config: {
-          drive_id: selectedDrive.id,
+          drive_id: firstPartition?.id ?? selectedDrive.id,
+          drive_path: drivePath,
+          total_bytes: firstPartition?.total_bytes ?? selectedDrive.total_bytes,
           enable_fast_scan: true,
           enable_deep_scan: true,
           sector_size: 512,
@@ -255,12 +143,23 @@ export const App: React.FC = () => {
   };
 
   const handleConfirmExport = async (destinationPath: string) => {
-    const { selectedFileIds } = useAppStore.getState();
+    const { selectedFileIds, scannedFiles } = useAppStore.getState();
+    const ids = Array.from(selectedFileIds);
+    // Build file_paths so the backend can copy real bytes
+    const filePaths = ids
+      .map((id) => scannedFiles.find((f) => f.id === id))
+      .filter(Boolean)
+      .map((f) => ({
+        file_id: f!.id,
+        original_path: f!.original_path,
+        file_name: f!.file_name,
+      }));
     await invoke('export_files', {
       request: {
-        file_ids: Array.from(selectedFileIds),
+        file_ids: ids,
         destination_path: destinationPath,
         source_drive_mount: selectedDrive?.partitions[0]?.mount_point || 'C:\\',
+        file_paths: filePaths,
       },
     });
   };
